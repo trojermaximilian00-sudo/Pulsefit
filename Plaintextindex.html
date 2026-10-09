@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulseFit - Performance Tracker</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0d0f12;
+      --card-bg: #181b20;
+      --accent-green: #00e676;
+      --accent-yellow: #ffea00;
+      --accent-blue: #29b6f6;
+      --text: #ffffff;
+      --text-dim: #90a4ae;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      max-width: 420px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+    }
+    .title {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+    .status-badge {
+      font-size: 0.8rem;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.1);
+      color: var(--text-dim);
+    }
+    .status-badge.connected {
+      background: rgba(0, 230, 118, 0.2);
+      color: var(--accent-green);
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .recovery-score {
+      text-align: center;
+    }
+    .score-circle {
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      border: 8px solid var(--accent-green);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      margin: 12px auto;
+    }
+    .score-val {
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+    .score-label {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .metric-box {
+      background: rgba(255,255,255,0.03);
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    .metric-val {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent-blue);
+    }
+    .btn {
+      width: 100%;
+      background: var(--accent-green);
+      color: #000;
+      font-weight: 700;
+      border: none;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:active {
+      opacity: 0.8;
+    }
+    canvas {
+      width: 100% !important;
+      height: 180px !important;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="title">PULSEFIT</div>
+    <div id="status" class="status-badge">Nicht verbunden</div>
+  </div>
+
+  <button class="btn" id="connectBtn" onclick="connectBluetooth()">Wahoo Band Koppeln (BLE)</button>
+
+  <div class="card recovery-score">
+    <div class="score-label">RECOVERY SCORE</div>
+    <div class="score-circle">
+      <div class="score-val" id="recoveryVal">87%</div>
+    </div>
+    <div style="color: var(--text-dim); font-size: 0.9rem;" id="recoveryStatus">Bereit für hohes Training</div>
+  </div>
+
+  <div class="metrics-grid">
+    <div class="card metric-box">
+      <div class="score-label">PULS (BPM)</div>
+      <div class="metric-val" id="hrVal">--</div>
+    </div>
+    <div class="card metric-box">
+      <div class="score-label">HRV (RMSSD)</div>
+      <div class="metric-val" id="hrvVal">68 ms</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="score-label" style="margin-bottom: 12px;">7-TAGE HR TREND</div>
+    <canvas id="trendChart"></canvas>
+  </div>
+</div>
+
+<script>
+  let heartRateSensor = null;
+
+  async function connectBluetooth() {
+    const statusEl = document.getElementById('status');
+    const hrValEl = document.getElementById('hrVal');
+    
+    try {
+      statusEl.innerText = "Suche Gerät...";
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ services: ['heart_rate'] }]
+      });
+
+      statusEl.innerText = "Verbinde...";
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService('heart_rate');
+      const characteristic = await service.getCharacteristic('heart_rate_measurement');
+
+      await characteristic.startNotifications();
+      characteristic.addEventListener('characteristicvaluechanged', handleHeartRateData);
+
+      statusEl.innerText = "Verbunden";
+      statusEl.classList.add('connected');
+    } catch (error) {
+      console.error(error);
+      statusEl.innerText = "Verbindung fehlgeschlagen";
+      alert("Bluetooth-Verbindung fehlgeschlagen oder abgebrochen.");
+    }
+  }
+
+  function handleHeartRateData(event) {
+    const value = event.target.value;
+    const flags = value.getUint8(0);
+    let hr;
+    
+    if (flags & 0x01) {
+      hr = value.getUint16(1, true);
+    } else {
+      hr = value.getUint8(1);
+    }
+
+    document.getElementById('hrVal').innerText = hr;
+  }
+
+  // Chart setup
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
+      datasets: [{
+        label: 'Ruhepuls (BPM)',
+        data: [58, 56, 55, 59, 54, 52, 53],
+        borderColor: '#29b6f6',
+        backgroundColor: 'rgba(41, 182, 246, 0.1)',
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#90a4ae' } },
+        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#90a4ae' } }
+      }
+    }
+  });
+</script>
+
+</body>
+</html>
